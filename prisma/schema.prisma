@@ -1,0 +1,232 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// USERS
+// ─────────────────────────────────────────────
+model User {
+  id              String   @id @default(uuid())
+  fullName        String   @map("full_name")
+  username        String   @unique
+  passwordHash    String   @map("password_hash")
+  avatarUrl       String?  @map("avatar_url")
+  avatarPublicId  String?  @map("avatar_public_id")
+  resetToken      String?  @map("reset_token")
+  resetTokenExp   DateTime? @map("reset_token_exp")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  quizzes         Quiz[]
+  attempts        Attempt[]
+  roomsHosted     Room[]        @relation("RoomHost")
+  roomPlayers     RoomPlayer[]
+  topicStats      UserTopicStat[]
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────
+// QUIZZES
+// ─────────────────────────────────────────────
+model Quiz {
+  id              String      @id @default(uuid())
+  authorId        String      @map("author_id")
+  author          User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  title           String
+  description     String?
+  topic           String
+  difficulty      Difficulty  @default(MEDIUM)
+  coverUrl        String?     @map("cover_url")
+  coverPublicId   String?     @map("cover_public_id")
+  isPublic        Boolean     @default(false) @map("is_public")
+  visibility      Visibility  @default(PRIVATE)
+  shareCode       String      @unique @map("share_code")
+  status          QuizStatus  @default(DRAFT)
+  forkedFromId    String?     @map("forked_from_id")
+  forkedFrom      Quiz?       @relation("QuizForks", fields: [forkedFromId], references: [id], onDelete: SetNull)
+  forks           Quiz[]      @relation("QuizForks")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  questions       Question[]
+  attempts        Attempt[]
+  rooms           Room[]
+
+  @@map("quizzes")
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum Visibility {
+  PUBLIC
+  LINK_ONLY
+  PRIVATE
+}
+
+enum QuizStatus {
+  DRAFT
+  PUBLISHED
+}
+
+// ─────────────────────────────────────────────
+// QUESTIONS
+// ─────────────────────────────────────────────
+model Question {
+  id              String        @id @default(uuid())
+  quizId          String        @map("quiz_id")
+  quiz            Quiz          @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  text            String
+  imageUrl        String?       @map("image_url")
+  imagePublicId   String?       @map("image_public_id")
+  type            QuestionType  @default(MCQ)
+  orderIndex      Int           @map("order_index")
+  explanation     String?
+  hint            String?
+  difficultyScore Float         @default(2.5) @map("difficulty_score")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  options         Option[]
+  attemptAnswers  AttemptAnswer[]
+
+  @@map("questions")
+}
+
+enum QuestionType {
+  MCQ
+  TRUE_FALSE
+  SHORT_ANSWER
+}
+
+// ─────────────────────────────────────────────
+// OPTIONS (MCQ / True-False answers)
+// ─────────────────────────────────────────────
+model Option {
+  id          String    @id @default(uuid())
+  questionId  String    @map("question_id")
+  question    Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  text        String
+  isCorrect   Boolean   @default(false) @map("is_correct")
+
+  attemptAnswers  AttemptAnswer[]
+
+  @@map("options")
+}
+
+// ─────────────────────────────────────────────
+// ATTEMPTS
+// ─────────────────────────────────────────────
+model Attempt {
+  id              String        @id @default(uuid())
+  userId          String        @map("user_id")
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quizId          String        @map("quiz_id")
+  quiz            Quiz          @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  mode            AttemptMode   @default(TEST)
+  score           Int           @default(0)
+  totalQuestions  Int           @default(0) @map("total_questions")
+  adaptiveLevel   Float         @default(2.5) @map("adaptive_level")
+  startedAt       DateTime      @default(now()) @map("started_at")
+  completedAt     DateTime?     @map("completed_at")
+
+  answers         AttemptAnswer[]
+
+  @@map("attempts")
+}
+
+enum AttemptMode {
+  TEST
+  LEARNING
+  BATTLE
+  ADAPTIVE
+}
+
+// ─────────────────────────────────────────────
+// ATTEMPT ANSWERS (per-question record)
+// ─────────────────────────────────────────────
+model AttemptAnswer {
+  id                String    @id @default(uuid())
+  attemptId         String    @map("attempt_id")
+  attempt           Attempt   @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId        String    @map("question_id")
+  question          Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  selectedOptionId  String?   @map("selected_option_id")
+  selectedOption    Option?   @relation(fields: [selectedOptionId], references: [id], onDelete: SetNull)
+  shortAnswerText   String?   @map("short_answer_text")
+  isCorrect         Boolean   @default(false) @map("is_correct")
+  timeTakenMs       Int       @default(0) @map("time_taken_ms")
+  hintUsed          Boolean   @default(false) @map("hint_used")
+  retryUsed         Boolean   @default(false) @map("retry_used")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  @@map("attempt_answers")
+}
+
+// ─────────────────────────────────────────────
+// ROOMS (Multiplayer)
+// ─────────────────────────────────────────────
+model Room {
+  id        String      @id @default(uuid())
+  hostId    String      @map("host_id")
+  host      User        @relation("RoomHost", fields: [hostId], references: [id], onDelete: Cascade)
+  quizId    String      @map("quiz_id")
+  quiz      Quiz        @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  code      String      @unique
+  status    RoomStatus  @default(WAITING)
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  players   RoomPlayer[]
+
+  @@map("rooms")
+}
+
+enum RoomStatus {
+  WAITING
+  ACTIVE
+  FINISHED
+}
+
+// ─────────────────────────────────────────────
+// ROOM PLAYERS
+// ─────────────────────────────────────────────
+model RoomPlayer {
+  id          String    @id @default(uuid())
+  roomId      String    @map("room_id")
+  room        Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId      String    @map("user_id")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  score       Int       @default(0)
+  rank        Int?
+  joinedAt    DateTime  @default(now()) @map("joined_at")
+  finishedAt  DateTime? @map("finished_at")
+
+  @@unique([roomId, userId])
+  @@map("room_players")
+}
+
+// ─────────────────────────────────────────────
+// ANALYTICS (precomputed per user per topic)
+// ─────────────────────────────────────────────
+model UserTopicStat {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topic           String
+  totalQuestions  Int      @default(0) @map("total_questions")
+  correct         Int      @default(0)
+  avgTimeMs       Float    @default(0) @map("avg_time_ms")
+  lastUpdated     DateTime @default(now()) @map("last_updated")
+
+  @@unique([userId, topic])
+  @@map("user_topic_stats")
+}
